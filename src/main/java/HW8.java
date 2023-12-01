@@ -36,7 +36,7 @@ public class HW8 implements AutoCloseable{
         return Integer.parseInt(id);
     }
 
-    public String welcomeQuery(int userId){
+    private String welcomeQuery(int userId){
         String qResult;
         try(var session = driver.session(SessionConfig.forDatabase("hw7"))){
             qResult = session.executeWrite(tx -> {
@@ -60,6 +60,48 @@ public class HW8 implements AutoCloseable{
         return qResult;
     }
 
+    private void searchMovie(String movieName, int userId){
+        try (var session = driver.session(SessionConfig.forDatabase("hw7"))) {
+
+            var result = session.readTransaction(tx -> {
+                var query = new Query(
+                        "MATCH (m:Movie)-[:IN_GENRE]->(g:Genre)\n" +
+                                "WHERE toLower(m.title) CONTAINS toLower($searchKeyword)\n" +
+                                "WITH m, g\n" +
+                                "OPTIONAL MATCH (m)<-[ur:RATED]-(u:User {userId: $userId})\n" +
+                                "WITH m, g, ur, u\n" +
+                                "Match (m)<-[r:RATED]-(alluser:User)\n" +
+                                "WITH m, g, u, AVG(r.rating) AS avgRating, COLLECT(DISTINCT ur.rating) AS userRatings\n" +
+                                "RETURN \n" +
+                                "  m.title AS movieTitle, \n" +
+                                "  COLLECT(DISTINCT g.name) AS genres, \n" +
+                                "  avgRating AS averageRating,\n" +
+                                "  CASE WHEN u IS NOT NULL THEN true ELSE false END AS userHasRated,\n" +
+                                "  userRatings\n",
+                        parameters("searchKeyword", movieName, "userId", userId)
+                );
+                return tx.run(query).list();
+            });
+
+            // Process the result as needed
+            for (Record record : result) {
+                String movieTitle = record.get("movieTitle").asString();
+                List<String> genres = record.get("genres").asList(Value::asString);
+                double averageRating = record.get("averageRating").asDouble();
+                boolean hasRated = record.get("userHasRated").asBoolean();
+                List<Object> userRatings = record.get("userRatings").asList(Value::asObject);
+
+                // Do something with the retrieved data, e.g., print or use it in your application
+                System.out.println("Movie Title: " + movieTitle);
+                System.out.println("Genres: " + genres);
+                System.out.println("Average Rating: " + averageRating);
+                System.out.println("Has Rated: " + hasRated);
+                System.out.println("User Ratings: " + userRatings);
+                System.out.println("------");
+            }
+        }
+    }
+
     public static void main(String... args){
         try (var hw8 = new HW8("bolt://localhost:7687", "neo4j", "ModernDB")) {
             // Step 1
@@ -72,45 +114,12 @@ public class HW8 implements AutoCloseable{
             //already seen it (rated it) and their rating for all matching movies.
             System.out.println("What is the name of the movie you want to search?");
             String movieName = getUserInput();
-            try (var session = hw8.driver.session(SessionConfig.forDatabase("hw7"))) {
+            hw8.searchMovie(movieName, userId);
 
-                var result = session.readTransaction(tx -> {
-                    var query = new Query(
-                            "MATCH (m:Movie)-[:IN_GENRE]->(g:Genre)\n" +
-                                    "WHERE toLower(m.title) CONTAINS toLower($searchKeyword)\n" +
-                                    "WITH m, g\n" +
-                                    "OPTIONAL MATCH (m)<-[ur:RATED]-(u:User {userId: $userId})\n" +
-                                    "WITH m, g, ur, u\n" +
-                                    "Match (m)<-[r:RATED]-(alluser:User)\n" +
-                                    "WITH m, g, u, AVG(r.rating) AS avgRating, COLLECT(DISTINCT ur.rating) AS userRatings\n" +
-                                    "RETURN \n" +
-                                    "  m.title AS movieTitle, \n" +
-                                    "  COLLECT(DISTINCT g.name) AS genres, \n" +
-                                    "  avgRating AS averageRating,\n" +
-                                    "  CASE WHEN u IS NOT NULL THEN true ELSE false END AS userHasRated,\n" +
-                                    "  userRatings\n",
-                            parameters("searchKeyword", movieName, "userId", userId)
-                    );
-                    return tx.run(query).list();
-                });
 
-                // Process the result as needed
-                for (Record record : result) {
-                    String movieTitle = record.get("movieTitle").asString();
-                    List<String> genres = record.get("genres").asList(Value::asString);
-                    double averageRating = record.get("averageRating").asDouble();
-                    boolean hasRated = record.get("userHasRated").asBoolean();
-                    List<Object> userRatings = record.get("userRatings").asList(Value::asObject);
 
-                    // Do something with the retrieved data, e.g., print or use it in your application
-                    System.out.println("Movie Title: " + movieTitle);
-                    System.out.println("Genres: " + genres);
-                    System.out.println("Average Rating: " + averageRating);
-                    System.out.println("Has Rated: " + hasRated);
-                    System.out.println("User Ratings: " + userRatings);
-                    System.out.println("------");
-                }
-            }
+            // Step 3 Provide the user with their top 5 recommendations
+
 
         }
     }
