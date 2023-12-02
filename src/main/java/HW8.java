@@ -3,9 +3,7 @@ import org.neo4j.driver.Record;
 
 import static org.neo4j.driver.Values.parameters;
 
-import java.util.List;
-import java.util.Objects;
-import java.util.Scanner;
+import java.util.*;
 
 /**
  * @author Roy Huang
@@ -29,15 +27,18 @@ public class HW8 implements AutoCloseable{
         return scanner.nextLine();
     }
 
+    private static int validInt(int low, int high){
+        int input = Integer.parseInt(getUserInput());
+        while (input < low || input > high) {
+            System.out.println("Invalid input, please enter (" + low + "-" + high + ")");
+            input = Integer.parseInt(getUserInput());
+        }
+        return input;
+    }
+
     private static int welcome(){
         System.out.println("What is your id? (1-600)");
-        String id = getUserInput();
-        // check if id is valid (1-600)
-        while (Integer.parseInt(id) < 1 || Integer.parseInt(id) > 600) {
-            System.out.println("Invalid id, please enter (1-600)");
-            id = getUserInput();
-        }
-        return Integer.parseInt(id);
+        return validInt(1, 600);
     }
 
     private String welcomeQuery(int userId){
@@ -67,7 +68,7 @@ public class HW8 implements AutoCloseable{
     private void searchMovie(String movieName, int userId){
         try (var session = driver.session(SessionConfig.forDatabase("hw7"))) {
 
-            var result = session.readTransaction(tx -> {
+            var result = session.executeRead(tx -> {
                 var query = new Query(
                         "MATCH (m:Movie)-[:IN_GENRE]->(g:Genre)\n" +
                                 "WHERE toLower(m.title) CONTAINS toLower($searchKeyword)\n" +
@@ -75,13 +76,13 @@ public class HW8 implements AutoCloseable{
                                 "OPTIONAL MATCH (m)<-[ur:RATED]-(u:User {userId: $userId})\n" +
                                 "WITH m, g, ur, u\n" +
                                 "Match (m)<-[r:RATED]-(alluser:User)\n" +
-                                "WITH m, g, u, AVG(r.rating) AS avgRating, COLLECT(DISTINCT ur.rating) AS userRatings\n" +
+                                "WITH m, g, u, AVG(r.rating) AS avgRating, ur.rating AS userRatings\n" +
                                 "RETURN \n" +
                                 "  m.title AS movieTitle, \n" +
                                 "  COLLECT(DISTINCT g.name) AS genres, \n" +
                                 "  avgRating AS averageRating,\n" +
                                 "  CASE WHEN u IS NOT NULL THEN true ELSE false END AS userHasRated,\n" +
-                                "  userRatings\n",
+                                "  Case when userRatings Is Null then 0 else userRatings End as userRatings\n",
                         parameters("searchKeyword", movieName, "userId", userId)
                 );
                 return tx.run(query).list();
@@ -93,23 +94,26 @@ public class HW8 implements AutoCloseable{
                 List<String> genres = record.get("genres").asList(Value::asString);
                 double averageRating = record.get("averageRating").asDouble();
                 boolean hasRated = record.get("userHasRated").asBoolean();
-                List<Object> userRatings = record.get("userRatings").asList(Value::asObject);
+                double userRatings = record.get("userRatings").asDouble();
 
                 // Do something with the retrieved data, e.g., print or use it in your application
                 System.out.println("Movie Title: " + movieTitle);
                 System.out.println("Genres: " + genres);
                 System.out.println("Average Rating: " + averageRating);
                 System.out.println("Has Rated: " + hasRated);
-                System.out.println("User Ratings: " + userRatings);
+                if (hasRated){
+                    System.out.println("User Ratings: " + userRatings);
+                }
                 System.out.println("------");
             }
         }
     }
 
-    private void top5Recommendations(int userId){
+    private List<Integer> top5Recommendations(int userId){
+        List<Integer> movieIdList = new ArrayList<>();
         try (var session = driver.session(SessionConfig.forDatabase("hw7"))) {
 
-            var result = session.readTransaction(tx -> {
+            var result = session.executeRead(tx -> {
                 var query = new Query(
                         "with $userId as X\n" +
                                 "match (user:User {userId: X})-[rated:RATED]->(ratedMovie:Movie)\n" +
@@ -123,7 +127,7 @@ public class HW8 implements AutoCloseable{
                                 "And not r = rated\n" +
                                 "with m, avg(r.rating) as avgRating\n" +
                                 "order by avgRating desc\n" +
-                                "return m.title as title, m.movieId, avgRating\n" +
+                                "return m.title as title, m.movieId as movieId, avgRating\n" +
                                 "limit 5",
                         parameters("userId", userId)
                 );
@@ -133,13 +137,38 @@ public class HW8 implements AutoCloseable{
             // Process the result as needed
             for (Record record : result) {
                 String movieTitle = record.get("title").asString();
+                int movieId = record.get("movieId").asInt();
+                movieIdList.add(movieId);
                 double averageRating = record.get("avgRating").asDouble();
 
-                // todo: return movie id list
+                // print number, title, and average rating
+                System.out.println(movieIdList.size() + ". ");
                 System.out.println("Movie Title: " + movieTitle);
                 System.out.println("Average Rating: " + averageRating);
                 System.out.println("------");
             }
+        }
+        return movieIdList;
+    }
+
+    private void addRating(int movieId, int userId, int rating){
+        try (var session = driver.session(SessionConfig.forDatabase("hw7"))) {
+
+            var result = session.executeWrite(tx -> {
+                var query = new Query(
+                        "match (u:User {userId: $userId})\n" +
+                                "with u\n" +
+                                "match (m:Movie {movieId: $movieId})\n" +
+                                "with u, m\n" +
+                                "create (u)-[r:RATED {rating: $rating, time: timestamp()}]->(m)\n" +
+                                "return u, m, r",
+                        parameters("userId", userId, "movieId", movieId, "rating", rating)
+                );
+                return tx.run(query);
+            });
+
+            // Process the result as needed
+            System.out.println("Rating added!");
         }
     }
 
@@ -177,14 +206,23 @@ public class HW8 implements AutoCloseable{
              */
             System.out.println("\n\n"); // add three lines to separate from previous step
             System.out.println("Here are your top 5 recommendations:");
-            hw8.top5Recommendations(userId);
+            List<Integer> movieList = hw8.top5Recommendations(userId);
 
             // Step 4
             // provide a rating for any of the previous recommendations
             // add the RATED relationship
+            System.out.println("Do you want to rate any of the movies? (y/n)");
+            String rate = getUserInput();
+            if (Objects.equals(rate, "y")){
+                // choose movie and rate
+                System.out.println("Which movie do you want to rate? (1-5)");
+                int movieIndex = validInt(1, 5);
+                System.out.println("What is your rating? (0-5)");
+                int rating = validInt(0, 5);
 
-
-
+                // query
+                hw8.addRating(movieList.get(movieIndex-1), userId, rating);
+            }
         }
     }
 }
