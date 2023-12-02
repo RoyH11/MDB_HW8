@@ -7,6 +7,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Scanner;
 
+/**
+ * @author Roy Huang
+ * assisted by GitHub copilot
+ */
 public class HW8 implements AutoCloseable{
     private final Driver driver;
     // add a scanner to get user input
@@ -102,6 +106,43 @@ public class HW8 implements AutoCloseable{
         }
     }
 
+    private void top5Recommendations(int userId){
+        try (var session = driver.session(SessionConfig.forDatabase("hw7"))) {
+
+            var result = session.readTransaction(tx -> {
+                var query = new Query(
+                        "with $userId as X\n" +
+                                "match (user:User {userId: X})-[rated:RATED]->(ratedMovie:Movie)\n" +
+                                "with user, rated\n" +
+                                "match (user)-[pref:genre_pref]->(favG:Genre)\n" +
+                                "with pref, favG, rated\n" +
+                                "order by pref.preference desc\n" +
+                                "limit 1\n" +
+                                "match (:User)-[r:RATED]->(m:Movie)-[:IN_GENRE]->(g:Genre)\n" +
+                                "where g.name = favG.name\n" +
+                                "And not r = rated\n" +
+                                "with m, avg(r.rating) as avgRating\n" +
+                                "order by avgRating desc\n" +
+                                "return m.title as title, m.movieId, avgRating\n" +
+                                "limit 5",
+                        parameters("userId", userId)
+                );
+                return tx.run(query).list();
+            });
+
+            // Process the result as needed
+            for (Record record : result) {
+                String movieTitle = record.get("title").asString();
+                double averageRating = record.get("avgRating").asDouble();
+
+                // todo: return movie id list
+                System.out.println("Movie Title: " + movieTitle);
+                System.out.println("Average Rating: " + averageRating);
+                System.out.println("------");
+            }
+        }
+    }
+
     public static void main(String... args){
         try (var hw8 = new HW8("bolt://localhost:7687", "neo4j", "ModernDB")) {
             // Step 1
@@ -116,9 +157,32 @@ public class HW8 implements AutoCloseable{
             String movieName = getUserInput();
             hw8.searchMovie(movieName, userId);
 
+            // Step 3
+            // Provide the user with their top 5 recommendations
+            // Q5.3 from Homework 7
+            /* with 1 as X
+                match (user:User {userId: X})-[rated:RATED]->(ratedMovie:Movie)
+                with user, rated
+                match (user)-[pref:genre_pref]->(favG:Genre)
+                with pref, favG, rated
+                order by pref.preference desc
+                limit 1
+                match (:User)-[r:RATED]->(m:Movie)-[:IN_GENRE]->(g:Genre)
+                where g.name = favG.name
+                And not r = rated
+                with m, avg(r.rating) as avgRating
+                order by avgRating desc
+                return m.title as title, avgRating
+                limit 5
+             */
+            System.out.println("\n\n"); // add three lines to separate from previous step
+            System.out.println("Here are your top 5 recommendations:");
+            hw8.top5Recommendations(userId);
 
+            // Step 4
+            // provide a rating for any of the previous recommendations
+            // add the RATED relationship
 
-            // Step 3 Provide the user with their top 5 recommendations
 
 
         }
