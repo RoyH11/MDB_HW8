@@ -119,12 +119,12 @@ public class HW8 implements AutoCloseable{
                                 "match (user:User {userId: X})-[rated:RATED]->(ratedMovie:Movie)\n" +
                                 "with user, rated\n" +
                                 "match (user)-[pref:genre_pref]->(favG:Genre)\n" +
-                                "with pref, favG, rated\n" +
+                                "with pref, favG, rated, user\n" +
                                 "order by pref.preference desc\n" +
                                 "limit 1\n" +
                                 "match (:User)-[r:RATED]->(m:Movie)-[:IN_GENRE]->(g:Genre)\n" +
                                 "where g.name = favG.name\n" +
-                                "And not r = rated\n" +
+                                "And not (user)-[:RATED]->(m)\n" +
                                 "with m, avg(r.rating) as avgRating\n" +
                                 "order by avgRating desc\n" +
                                 "return m.title as title, m.movieId as movieId, avgRating\n" +
